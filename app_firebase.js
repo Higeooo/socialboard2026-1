@@ -2,48 +2,53 @@
    SOCIAL BOARD v2 — Firebase Realtime Database Edition
    GAS(app.js) → Firebase 마이그레이션 버전
    ============================================================
-   변경된 부분: GAS_URL → Firebase 설정, api() 함수 전체 교체
-   유지된 부분: state, 유틸, UI 렌더링, 이벤트 바인딩 모두 동일
+   v2.1 변경사항:
+   - 학생 회원가입 신청 (학번, 이름, 교사코드, 비밀번호)
+   - 기간별 교사코드 (expiresAt 포함)
+   - 관리자 승인/탈퇴/비밀번호 초기화 (회원 관리 탭)
+   - 학생 로그인: 학번 + 비밀번호
    ============================================================ */
 
 // ★ 배포 전 반드시 교체하세요
-const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebasedatabase.app';
+const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const FB_STORAGE = 'yulha-2026-1.appspot.com'; // 파일 첨부 사용 시
 
 /*
-  ── Firebase 데이터 구조 ─────────────────────────────────────
+  ── Firebase 데이터 구조 (v2.1) ──────────────────────────────
   /meta/activeSemester              ← 현재 학기 ("2026-1")
   /admins/{adminId}/password        ← 관리자 비밀번호
-  /students/{sid}/name              ← 학생 이름
-  /students/{sid}/klass             ← 반 (선택)
+
+  /codes/{codeId}/                  ← 교사 코드
+    value: "yulha2026"              ← 학생이 입력하는 코드값
+    label: "1학기 가입용"
+    expiresAt: "2026-09-01"         ← 만료일 (YYYY-MM-DD)
+
+  /pending/{sid}/                   ← 승인 대기 학생
+    name, passwordHash, requestedAt
+
+  /students/{sid}/                  ← 승인된 학생
+    name, klass, passwordHash, approved: true, approvedAt
+
   /{semester}/classes/{classId}/    ← 반
   /{semester}/activities/{id}/      ← 활동
   /{semester}/groups/{id}/          ← 조
   /{semester}/posts/{id}/           ← 게시물
 
-  ── 학생 명단 등록 방법 ──────────────────────────────────────
-  Firebase Console → Realtime Database → 직접 입력:
-  students/
-    10101/
-      name: "홍길동"
-      klass: "1반"
-    10102/
-      name: "김철수"
-      klass: "1반"
-
-  또는 아래 setup() 함수로 일괄 등록 가능.
-
-  ── Firebase Security Rules (테스트용) ──────────────────────
+  ── Firebase 초기 데이터 예시 ────────────────────────────────
   {
-    "rules": {
-      ".read": true,
-      ".write": true
+    "meta": { "activeSemester": "2026-1" },
+    "admins": { "teacher": { "password": "teacher1234" } },
+    "codes": {
+      "code1": {
+        "value": "yulha2026",
+        "label": "1학기 가입용",
+        "expiresAt": "2026-09-01"
+      }
     }
   }
-  ★ 실제 운영 시 rules를 강화하세요.
-  ─────────────────────────────────────────────────────────── */
+  ──────────────────────────────────────────────────────────── */
 
-// ----------- 전역 상태 ----------- (원본과 동일)
+// ----------- 전역 상태 -----------
 const state = {
   user: null,
   adminToken: null,
@@ -56,7 +61,7 @@ const state = {
   }
 };
 
-// ----------- 유틸 ----------- (원본과 동일)
+// ----------- 유틸 -----------
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -83,15 +88,22 @@ function fmtDate(iso) {
 }
 
 function show(screenId) {
-  ['screen-login','screen-classes','screen-activities','screen-board'].forEach(id => {
-    $('#'+id).hidden = (id !== screenId);
+  ['screen-login','screen-register','screen-classes','screen-activities','screen-board','screen-members'].forEach(id => {
+    const el = $('#'+id);
+    if (el) el.hidden = (id !== screenId);
   });
-  $('#topbar').hidden = (screenId === 'screen-login');
+  $('#topbar').hidden = (screenId === 'screen-login' || screenId === 'screen-register');
 }
 
 function isAdmin() { return !!(state.user && state.user.admin); }
 
-// ----------- 세션 ----------- (원본과 동일)
+// ----------- SHA-256 해시 -----------
+async function sha256(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// ----------- 세션 -----------
 function saveSession() {
   sessionStorage.setItem('sb.session', JSON.stringify({
     user: state.user, adminToken: state.adminToken, semester: state.semester
@@ -117,10 +129,8 @@ function clearSession() {
 }
 
 // ============================================================
-//  ★ Firebase Helpers (GAS api() 대체)
+//  Firebase Helpers
 // ============================================================
-
-/** Firebase REST API 공통 요청 */
 async function fbReq(path, method = 'GET', data = null) {
   const url = FB_URL + path + '.json';
   const opts = { method };
@@ -139,22 +149,19 @@ const fbPatch  = (path, d)  => fbReq(path, 'PATCH', d);
 const fbDelete = path       => fbReq(path, 'DELETE');
 async function fbPush(path, data) {
   const r = await fbReq(path, 'POST', data);
-  return r.name; // Firebase 자동생성 키
+  return r.name;
 }
 
-/** Firebase 객체 → 배열 변환 */
 function objToArr(obj) {
   if (!obj) return [];
   return Object.entries(obj).map(([k, v]) => ({ _id: k, ...v }));
 }
 
-/** 관리자 권한 확인 (클라이언트 사이드) */
 function verifyAdmin(token) {
   if (!state.adminToken || state.adminToken !== token)
     throw new Error('관리자 권한이 없습니다.');
 }
 
-/** Firebase Storage 파일 업로드 */
 async function fbUploadFile(base64, fileName, mime) {
   const ext  = fileName.split('.').pop();
   const path = 'posts/' + Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + ext;
@@ -169,50 +176,166 @@ async function fbUploadFile(base64, fileName, mime) {
 }
 
 // ============================================================
-//  ★ api() 디스패처 — 기존 GAS api() 와 완전히 같은 인터페이스
+//  api() 디스패처
 // ============================================================
 async function api(action, payload = {}) {
   switch (action) {
-    case 'auth.studentLogin':   return fbStudentLogin(payload);
-    case 'auth.adminLogin':     return fbAdminLogin(payload);
-    case 'meta.activeSemester': return fbGetMeta();
-    case 'class.list':          return fbClassList(payload);
-    case 'class.create':        return fbClassCreate(payload);
-    case 'class.delete':        return fbClassDelete(payload);
-    case 'activity.list':       return fbActivityList(payload);
-    case 'activity.create':     return fbActivityCreate(payload);
-    case 'activity.delete':     return fbActivityDelete(payload);
-    case 'activity.get':        return fbActivityGet(payload);
-    case 'group.list':          return fbGroupList(payload);
-    case 'group.makeColumns':   return fbMakeColumns(payload);
-    case 'group.rename':        return fbGroupRename(payload);
-    case 'post.list':           return fbPostList(payload);
-    case 'post.create':         return fbPostCreate(payload);
-    case 'post.moderate':       return fbPostModerate(payload);
-    case 'export.csv':          return fbExportCsv(payload);
+    case 'auth.studentLogin':    return fbStudentLogin(payload);
+    case 'auth.studentRegister': return fbStudentRegister(payload);
+    case 'auth.adminLogin':      return fbAdminLogin(payload);
+    case 'meta.activeSemester':  return fbGetMeta();
+    case 'class.list':           return fbClassList(payload);
+    case 'class.create':         return fbClassCreate(payload);
+    case 'class.delete':         return fbClassDelete(payload);
+    case 'activity.list':        return fbActivityList(payload);
+    case 'activity.create':      return fbActivityCreate(payload);
+    case 'activity.delete':      return fbActivityDelete(payload);
+    case 'activity.get':         return fbActivityGet(payload);
+    case 'group.list':           return fbGroupList(payload);
+    case 'group.makeColumns':    return fbMakeColumns(payload);
+    case 'group.rename':         return fbGroupRename(payload);
+    case 'post.list':            return fbPostList(payload);
+    case 'post.create':          return fbPostCreate(payload);
+    case 'post.moderate':        return fbPostModerate(payload);
+    case 'export.csv':           return fbExportCsv(payload);
+    // 회원 관리
+    case 'member.pendingList':   return fbPendingList(payload);
+    case 'member.approve':       return fbApprove(payload);
+    case 'member.reject':        return fbReject(payload);
+    case 'member.withdraw':      return fbWithdraw(payload);
+    case 'member.resetPassword': return fbResetPassword(payload);
+    case 'member.activeList':    return fbActiveList(payload);
+    case 'code.list':            return fbCodeList(payload);
+    case 'code.create':          return fbCodeCreate(payload);
+    case 'code.delete':          return fbCodeDelete(payload);
     default: throw new Error('Unknown action: ' + action);
   }
 }
 
 // ── 인증 ─────────────────────────────────────────────────────
-async function fbStudentLogin({ sid, name }) {
+
+async function fbStudentLogin({ sid, password }) {
   const student = await fbGet('/students/' + sid);
-  if (!student || student.name !== name)
-    throw new Error('학번 또는 이름이 명단과 일치하지 않습니다.');
+  if (!student) throw new Error('등록되지 않은 학번입니다. 회원가입을 먼저 진행해 주세요.');
+  if (!student.approved) throw new Error('관리자 승인 대기 중입니다. 잠시 후 다시 시도해 주세요.');
+  const hash = await sha256(password);
+  if (student.passwordHash !== hash) throw new Error('비밀번호가 올바르지 않습니다.');
   return { sid, name: student.name, klass: student.klass || '' };
+}
+
+async function fbStudentRegister({ sid, name, password, code }) {
+  // 1. 이미 승인된 학생인지 확인
+  const existing = await fbGet('/students/' + sid);
+  if (existing && existing.approved) throw new Error('이미 가입된 학번입니다.');
+
+  // 2. 대기 중인지 확인
+  const pending = await fbGet('/pending/' + sid);
+  if (pending) throw new Error('이미 승인 대기 중입니다. 관리자 승인을 기다려 주세요.');
+
+  // 3. 교사 코드 유효성 검사
+  const codes = await fbGet('/codes');
+  const codeArr = objToArr(codes);
+  const matched = codeArr.find(c => c.value === code);
+  if (!matched) throw new Error('교사 코드가 올바르지 않습니다.');
+  if (matched.expiresAt && new Date(matched.expiresAt) < new Date())
+    throw new Error('만료된 교사 코드입니다. 담당 선생님께 문의하세요.');
+
+  // 4. 대기 목록에 등록
+  const passwordHash = await sha256(password);
+  await fbSet('/pending/' + sid, {
+    name, passwordHash,
+    requestedAt: new Date().toISOString()
+  });
+  return { ok: true };
 }
 
 async function fbAdminLogin({ id, password }) {
   const admin = await fbGet('/admins/' + id);
   if (!admin || admin.password !== password)
     throw new Error('관리자 정보가 올바르지 않습니다.');
-  return { token: password }; // 비밀번호를 토큰으로 사용 (교실용)
+  return { token: password };
 }
 
 // ── 메타 ──────────────────────────────────────────────────────
 async function fbGetMeta() {
   const meta = await fbGet('/meta');
   return { semester: (meta && meta.activeSemester) || '2026-1' };
+}
+
+// ── 회원 관리 ─────────────────────────────────────────────────
+
+async function fbPendingList({ token }) {
+  verifyAdmin(token);
+  const raw = await fbGet('/pending');
+  return objToArr(raw).map(p => ({ sid: p._id, name: p.name, requestedAt: p.requestedAt }))
+    .sort((a, b) => (a.requestedAt||'').localeCompare(b.requestedAt||''));
+}
+
+async function fbApprove({ sid, token }) {
+  verifyAdmin(token);
+  const pending = await fbGet('/pending/' + sid);
+  if (!pending) throw new Error('대기 중인 학생을 찾을 수 없습니다.');
+  await fbSet('/students/' + sid, {
+    name: pending.name,
+    klass: pending.klass || '',
+    passwordHash: pending.passwordHash,
+    approved: true,
+    approvedAt: new Date().toISOString()
+  });
+  await fbDelete('/pending/' + sid);
+  return { ok: true };
+}
+
+async function fbReject({ sid, token }) {
+  verifyAdmin(token);
+  await fbDelete('/pending/' + sid);
+  return { ok: true };
+}
+
+async function fbWithdraw({ sid, token }) {
+  verifyAdmin(token);
+  await fbDelete('/students/' + sid);
+  return { ok: true };
+}
+
+async function fbResetPassword({ sid, token }) {
+  verifyAdmin(token);
+  const student = await fbGet('/students/' + sid);
+  if (!student) throw new Error('학생을 찾을 수 없습니다.');
+  const newHash = await sha256(sid); // 학번으로 초기화
+  await fbPatch('/students/' + sid, { passwordHash: newHash });
+  return { ok: true };
+}
+
+async function fbActiveList({ token }) {
+  verifyAdmin(token);
+  const raw = await fbGet('/students');
+  return objToArr(raw)
+    .filter(s => s.approved)
+    .map(s => ({ sid: s._id, name: s.name, klass: s.klass || '', approvedAt: s.approvedAt }))
+    .sort((a, b) => a.sid.localeCompare(b.sid));
+}
+
+// ── 교사 코드 관리 ────────────────────────────────────────────
+
+async function fbCodeList({ token }) {
+  verifyAdmin(token);
+  const raw = await fbGet('/codes');
+  return objToArr(raw).map(c => ({
+    codeId: c._id, value: c.value, label: c.label || '', expiresAt: c.expiresAt || ''
+  }));
+}
+
+async function fbCodeCreate({ value, label, expiresAt, token }) {
+  verifyAdmin(token);
+  const id = await fbPush('/codes', { value, label: label || '', expiresAt: expiresAt || '' });
+  return { codeId: id };
+}
+
+async function fbCodeDelete({ codeId, token }) {
+  verifyAdmin(token);
+  await fbDelete('/codes/' + codeId);
+  return { ok: true };
 }
 
 // ── 반 ────────────────────────────────────────────────────────
@@ -233,12 +356,9 @@ async function fbClassCreate({ semester, name, token }) {
 
 async function fbClassDelete({ semester, classId, token }) {
   verifyAdmin(token);
-  // 반 안의 활동 연쇄 삭제
   const acts = objToArr(await fbGet('/' + semester + '/activities'))
     .filter(a => a.classId === classId);
-  for (const a of acts) {
-    await _deleteActivity(semester, a._id);
-  }
+  for (const a of acts) await _deleteActivity(semester, a._id);
   await fbDelete('/' + semester + '/classes/' + classId);
   return { ok: true };
 }
@@ -283,16 +403,13 @@ async function fbActivityDelete({ semester, activityId, token }) {
   return { ok: true };
 }
 
-/** 내부 연쇄 삭제 (조 + 게시물 + 활동) */
 async function _deleteActivity(semester, activityId) {
   const groups = objToArr(await fbGet('/' + semester + '/groups'))
     .filter(g => g.activityId === activityId);
   for (const g of groups) await fbDelete('/' + semester + '/groups/' + g._id);
-
   const posts = objToArr(await fbGet('/' + semester + '/posts'))
     .filter(p => p.activityId === activityId);
   for (const p of posts) await fbDelete('/' + semester + '/posts/' + p._id);
-
   await fbDelete('/' + semester + '/activities/' + activityId);
 }
 
@@ -368,7 +485,7 @@ async function fbPostModerate({ semester, postId, status, token }) {
   return { ok: true };
 }
 
-// ── CSV 내보내기 (클라이언트 생성) ────────────────────────────
+// ── CSV 내보내기 ────────────────────────────────────────────
 async function fbExportCsv({ semester, scope, id }) {
   let posts = objToArr(await fbGet('/' + semester + '/posts'))
     .filter(p => p.status !== 'deleted')
@@ -392,19 +509,39 @@ async function fbExportCsv({ semester, scope, id }) {
 }
 
 // ============================================================
-//  아래부터는 원본 app.js 와 완전히 동일
+//  UI — 로그인 / 회원가입
 // ============================================================
 
 async function studentLogin() {
-  const sid  = $('#login-sid').value.trim();
-  const name = $('#login-name').value.trim();
-  if (!sid || !name) return toast('학번과 이름을 모두 입력해 주세요.', 'error');
+  const sid      = $('#login-sid').value.trim();
+  const password = $('#login-password').value;
+  if (!sid || !password) return toast('학번과 비밀번호를 입력해 주세요.', 'error');
   try {
-    const u = await api('auth.studentLogin', { sid, name, semester: state.semester });
+    const u = await api('auth.studentLogin', { sid, password });
     state.user = u;
     saveSession();
     enterApp();
     toast(`환영합니다, ${u.name} 님`, 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function studentRegister() {
+  const sid  = $('#reg-sid').value.trim();
+  const name = $('#reg-name').value.trim();
+  const code = $('#reg-code').value.trim();
+  const pw1  = $('#reg-pw').value;
+  const pw2  = $('#reg-pw2').value;
+  if (!sid || !name || !code || !pw1 || !pw2)
+    return toast('모든 항목을 입력해 주세요.', 'error');
+  if (pw1 !== pw2)
+    return toast('비밀번호가 일치하지 않습니다.', 'error');
+  if (pw1.length < 4)
+    return toast('비밀번호는 4자 이상이어야 합니다.', 'error');
+  try {
+    await api('auth.studentRegister', { sid, name, password: pw1, code });
+    toast('신청이 완료됐습니다. 관리자 승인 후 로그인할 수 있습니다.', 'success');
+    show('screen-login');
+    ['reg-sid','reg-name','reg-code','reg-pw','reg-pw2'].forEach(id => { const el = $('#'+id); if(el) el.value=''; });
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -438,9 +575,14 @@ async function enterApp() {
   $('#btn-new-class').hidden    = !isAdmin();
   $('#btn-new-activity').hidden = !isAdmin();
   $('#btn-export').hidden       = !isAdmin();
+  $('#btn-members').hidden      = !isAdmin();
   await renderClasses();
   show('screen-classes');
 }
+
+// ============================================================
+//  UI — 반 / 활동 / 게시물 (기존과 동일)
+// ============================================================
 
 async function renderClasses() {
   const grid = $('#class-grid');
@@ -799,6 +941,176 @@ async function exportCsv() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// ============================================================
+//  UI — 회원 관리 화면
+// ============================================================
+
+let memberTab = 'pending'; // 'pending' | 'active' | 'codes'
+
+async function openMembers() {
+  show('screen-members');
+  switchMemberTab(memberTab);
+}
+
+function switchMemberTab(tab) {
+  memberTab = tab;
+  $$('.member-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#member-pending').hidden = (tab !== 'pending');
+  $('#member-active').hidden  = (tab !== 'active');
+  $('#member-codes').hidden   = (tab !== 'codes');
+  if (tab === 'pending') renderPending();
+  if (tab === 'active')  renderActive();
+  if (tab === 'codes')   renderCodes();
+}
+
+async function renderPending() {
+  const root = $('#member-pending');
+  root.innerHTML = '<p class="muted">불러오는 중…</p>';
+  try {
+    const list = await api('member.pendingList', { token: state.adminToken });
+    if (!list.length) {
+      root.innerHTML = '<div class="empty"><strong>승인 대기 중인 학생이 없습니다.</strong></div>';
+      return;
+    }
+    root.innerHTML = `<table class="member-table">
+      <thead><tr><th>학번</th><th>이름</th><th>신청일시</th><th>처리</th></tr></thead>
+      <tbody>${list.map(s => `
+        <tr>
+          <td>${escapeHtml(s.sid)}</td>
+          <td>${escapeHtml(s.name)}</td>
+          <td>${fmtDate(s.requestedAt)}</td>
+          <td class="action-cell">
+            <button class="mini-btn success" data-action="approve" data-sid="${s.sid}">승인</button>
+            <button class="mini-btn danger"  data-action="reject"  data-sid="${s.sid}">거절</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+    root.querySelectorAll('[data-action="approve"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        try {
+          await api('member.approve', { sid: b.dataset.sid, token: state.adminToken });
+          toast('승인했습니다.', 'success'); renderPending();
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+    root.querySelectorAll('[data-action="reject"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm(`${b.dataset.sid} 학생의 신청을 거절할까요?`)) return;
+        try {
+          await api('member.reject', { sid: b.dataset.sid, token: state.adminToken });
+          toast('거절했습니다.', 'success'); renderPending();
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+  } catch(e) { root.innerHTML = `<p class="muted">오류: ${escapeHtml(e.message)}</p>`; }
+}
+
+async function renderActive() {
+  const root = $('#member-active');
+  root.innerHTML = '<p class="muted">불러오는 중…</p>';
+  try {
+    const list = await api('member.activeList', { token: state.adminToken });
+    if (!list.length) {
+      root.innerHTML = '<div class="empty"><strong>승인된 학생이 없습니다.</strong></div>';
+      return;
+    }
+    root.innerHTML = `<table class="member-table">
+      <thead><tr><th>학번</th><th>이름</th><th>반</th><th>승인일시</th><th>처리</th></tr></thead>
+      <tbody>${list.map(s => `
+        <tr>
+          <td>${escapeHtml(s.sid)}</td>
+          <td>${escapeHtml(s.name)}</td>
+          <td>${escapeHtml(s.klass)}</td>
+          <td>${fmtDate(s.approvedAt)}</td>
+          <td class="action-cell">
+            <button class="mini-btn" data-action="reset-pw" data-sid="${s.sid}">비밀번호 초기화</button>
+            <button class="mini-btn danger" data-action="withdraw" data-sid="${s.sid}">탈퇴</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+    root.querySelectorAll('[data-action="reset-pw"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm(`${b.dataset.sid} 학생의 비밀번호를 학번으로 초기화할까요?`)) return;
+        try {
+          await api('member.resetPassword', { sid: b.dataset.sid, token: state.adminToken });
+          toast(`비밀번호를 학번(${b.dataset.sid})으로 초기화했습니다.`, 'success');
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+    root.querySelectorAll('[data-action="withdraw"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm(`${b.dataset.sid} 학생을 탈퇴 처리할까요? 복구할 수 없습니다.`)) return;
+        try {
+          await api('member.withdraw', { sid: b.dataset.sid, token: state.adminToken });
+          toast('탈퇴 처리했습니다.', 'success'); renderActive();
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+  } catch(e) { root.innerHTML = `<p class="muted">오류: ${escapeHtml(e.message)}</p>`; }
+}
+
+async function renderCodes() {
+  const root = $('#member-codes');
+  root.innerHTML = '<p class="muted">불러오는 중…</p>';
+  try {
+    const list = await api('code.list', { token: state.adminToken });
+    const tableHtml = list.length ? `<table class="member-table">
+      <thead><tr><th>코드값</th><th>설명</th><th>만료일</th><th>상태</th><th>삭제</th></tr></thead>
+      <tbody>${list.map(c => {
+        const expired = c.expiresAt && new Date(c.expiresAt) < new Date();
+        return `<tr class="${expired?'expired-row':''}">
+          <td><code class="code-val">${escapeHtml(c.value)}</code></td>
+          <td>${escapeHtml(c.label)}</td>
+          <td>${escapeHtml(c.expiresAt) || '—'}</td>
+          <td><span class="pill ${expired?'pill-soft':'pill-mint'}">${expired?'만료':'유효'}</span></td>
+          <td><button class="mini-btn danger" data-action="del-code" data-id="${c.codeId}">삭제</button></td>
+        </tr>`;
+      }).join('')}
+      </tbody>
+    </table>` : '<div class="empty"><strong>등록된 교사 코드가 없습니다.</strong></div>';
+
+    root.innerHTML = `
+      <div class="code-form card" style="margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:16px;">새 교사 코드 추가</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;">
+          <label class="field" style="margin:0"><span>코드값</span><input id="new-code-value" type="text" placeholder="예: yulha2026"/></label>
+          <label class="field" style="margin:0"><span>설명</span><input id="new-code-label" type="text" placeholder="예: 1학기 가입용"/></label>
+          <label class="field" style="margin:0"><span>만료일</span><input id="new-code-expires" type="date"/></label>
+          <button class="btn-primary" id="btn-add-code" style="height:50px;">추가</button>
+        </div>
+      </div>
+      ${tableHtml}`;
+
+    root.querySelector('#btn-add-code').addEventListener('click', async () => {
+      const value     = root.querySelector('#new-code-value').value.trim();
+      const label     = root.querySelector('#new-code-label').value.trim();
+      const expiresAt = root.querySelector('#new-code-expires').value;
+      if (!value) return toast('코드값을 입력해 주세요.', 'error');
+      if (!expiresAt) return toast('만료일을 선택해 주세요.', 'error');
+      try {
+        await api('code.create', { value, label, expiresAt, token: state.adminToken });
+        toast('교사 코드를 추가했습니다.', 'success'); renderCodes();
+      } catch(e) { toast(e.message, 'error'); }
+    });
+
+    root.querySelectorAll('[data-action="del-code"]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('이 코드를 삭제할까요?')) return;
+        try {
+          await api('code.delete', { codeId: b.dataset.id, token: state.adminToken });
+          toast('삭제했습니다.', 'success'); renderCodes();
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+  } catch(e) { root.innerHTML = `<p class="muted">오류: ${escapeHtml(e.message)}</p>`; }
+}
+
+// ============================================================
+//  공용 유틸
+// ============================================================
+
 function prompt2(title, desc, defaultValue) {
   return new Promise(resolve => {
     $('#prompt-title').textContent = title; $('#prompt-desc').textContent = desc;
@@ -821,13 +1133,26 @@ function prompt2(title, desc, defaultValue) {
 }
 
 function bindOnce() {
+  // 로그인
   $('#btn-student-login').addEventListener('click', studentLogin);
   $('#btn-admin-login').addEventListener('click', adminLogin);
+  $('#btn-go-register').addEventListener('click', () => show('screen-register'));
+  $('#btn-go-login').addEventListener('click', () => show('screen-login'));
+  $('#btn-register-submit').addEventListener('click', studentRegister);
   $('#btn-logout').addEventListener('click', logout);
+
+  // 관리자
   $('#btn-new-class').addEventListener('click', newClass);
   $('#btn-new-activity').addEventListener('click', newActivity);
   $('#btn-make-columns').addEventListener('click', makeColumns);
   $('#btn-export').addEventListener('click', exportCsv);
+  $('#btn-members').addEventListener('click', openMembers);
+  $('#btn-back-from-members').addEventListener('click', () => show('screen-classes'));
+
+  // 회원 관리 탭
+  $$('.member-tab').forEach(b => b.addEventListener('click', () => switchMemberTab(b.dataset.tab)));
+
+  // 게시물
   $('#btn-new-post').addEventListener('click', () => {
     if (state.cur.columnsCreated && state.cur.groups.length > 0)
       openPostModal(state.cur.groups[0].groupId, state.cur.groups[0].title);
@@ -838,6 +1163,8 @@ function bindOnce() {
     const g = state.cur.groups.find(x => x.groupId === curGroupId);
     $('#post-target').textContent = g ? g.title : '조 선택';
   });
+
+  // 뒤로가기
   $$('[data-back]').forEach(b => {
     b.addEventListener('click', () => {
       const t = b.dataset.back;
@@ -850,11 +1177,16 @@ function bindOnce() {
   });
   $$('.seg').forEach(s => s.addEventListener('click', () => setPostType(s.dataset.type)));
   $('#btn-submit-post').addEventListener('click', submitPost);
-  ['login-sid','login-name'].forEach(id => {
+
+  // 엔터키
+  ['login-sid','login-password'].forEach(id => {
     $('#'+id).addEventListener('keydown', e => { if (e.key==='Enter') studentLogin(); });
   });
   ['admin-id','admin-pw'].forEach(id => {
     $('#'+id).addEventListener('keydown', e => { if (e.key==='Enter') adminLogin(); });
+  });
+  ['reg-sid','reg-name','reg-code','reg-pw','reg-pw2'].forEach(id => {
+    const el = $('#'+id); if(el) el.addEventListener('keydown', e => { if(e.key==='Enter') studentRegister(); });
   });
 }
 
