@@ -20,6 +20,7 @@
     <div class="topbar-right">
       <span id="semester-pill" class="pill pill-mint">2026-1학기</span>
       <span id="user-chip" class="user-chip"></span>
+      <button id="btn-members" class="btn-ghost" hidden>회원 관리</button>
       <button id="btn-logout" class="btn-ghost">로그아웃</button>
     </div>
   </nav>
@@ -31,27 +32,31 @@
   <main id="screen-login" class="screen screen-login">
     <header class="login-hero">
       <h1 class="display">SOCIAL<br/>BOARD<span class="dot">.</span></h1>
-      <p class="lede">김해율하고 학생들의 생각이 모이는 곳. 학번/이름을 입력하세요.</p>
+      <p class="lede">김해율하고 학생들의 생각이 모이는 곳.</p>
     </header>
 
     <div class="login-grid">
       <section class="card">
         <h2 class="card-title">학생 로그인</h2>
-        <p class="muted">담당 교사가 등록한 명단의 학번·이름과 일치해야 합니다.</p>
+        <p class="muted">학번과 비밀번호를 입력하세요.</p>
         <label class="field">
           <span>학번</span>
           <input type="text" id="login-sid" inputmode="numeric" placeholder="예: 10132" />
         </label>
         <label class="field">
-          <span>이름</span>
-          <input type="text" id="login-name" placeholder="예: 안지리" />
+          <span>비밀번호</span>
+          <input type="password" id="login-password" placeholder="비밀번호" />
         </label>
-        <button class="btn-primary btn-block" id="btn-student-login">학생으로 시작</button>
+        <button class="btn-primary btn-block" id="btn-student-login">로그인</button>
+        <p style="text-align:center;margin-top:14px;font-size:13px;color:var(--c-on-surface-variant)">
+          아직 계정이 없으신가요?
+          <button id="btn-go-register" style="background:none;border:none;color:var(--c-primary);font-weight:700;cursor:pointer;font-size:13px;">회원가입 신청</button>
+        </p>
       </section>
 
       <section class="card card-alt">
         <h2 class="card-title">관리자 로그인</h2>
-        <p class="muted">반·활동 생성, 게시물 작성·모더레이션, 결과물 일괄 다운로드.</p>
+        <p class="muted">반·활동 생성, 게시물 작성·모더레이션, 회원 관리.</p>
         <label class="field">
           <span>아이디</span>
           <input type="text" id="admin-id" placeholder="관리자 아이디" />
@@ -65,11 +70,55 @@
     </div>
 
     <footer class="login-footer">
-      <span class="dim">© Gimhae Yulha High School · SOCIAL BOARD v2</span>
+      <span class="dim">© Gimhae Yulha High School · SOCIAL BOARD v2.1</span>
     </footer>
   </main>
 
-  <!-- ======================== 2. 반 목록 ======================== -->
+  <!-- ======================== 2. 회원가입 ======================== -->
+  <main id="screen-register" class="screen screen-login" hidden>
+    <header class="login-hero">
+      <h1 class="display" style="font-size:clamp(36px,6vw,60px)">회원가입<br/>신청<span class="dot">.</span></h1>
+      <p class="lede">담당 선생님께 교사 코드를 받은 후 신청하세요.</p>
+    </header>
+
+    <div style="max-width:480px;">
+      <section class="card">
+        <h2 class="card-title">학생 정보 입력</h2>
+        <p class="muted">관리자 승인 후 로그인할 수 있습니다.</p>
+        <label class="field">
+          <span>학번</span>
+          <input type="text" id="reg-sid" inputmode="numeric" placeholder="예: 10132" />
+        </label>
+        <label class="field">
+          <span>이름</span>
+          <input type="text" id="reg-name" placeholder="실명을 입력하세요" />
+        </label>
+        <label class="field">
+          <span>교사 코드</span>
+          <input type="text" id="reg-code" placeholder="선생님께 받은 코드" />
+        </label>
+        <label class="field">
+          <span>비밀번호</span>
+          <input type="password" id="reg-pw" placeholder="4자 이상" />
+        </label>
+        <label class="field">
+          <span>비밀번호 확인</span>
+          <input type="password" id="reg-pw2" placeholder="비밀번호를 다시 입력하세요" />
+        </label>
+        <button class="btn-primary btn-block" id="btn-register-submit">신청하기</button>
+        <p style="text-align:center;margin-top:14px;font-size:13px;color:var(--c-on-surface-variant)">
+          이미 계정이 있으신가요?
+          <button id="btn-go-login" style="background:none;border:none;color:var(--c-primary);font-weight:700;cursor:pointer;font-size:13px;">로그인</button>
+        </p>
+      </section>
+    </div>
+
+    <footer class="login-footer">
+      <span class="dim">© Gimhae Yulha High School · SOCIAL BOARD v2.1</span>
+    </footer>
+  </main>
+
+  <!-- ======================== 3. 반 목록 ======================== -->
   <main id="screen-classes" class="screen container" hidden>
     <header class="page-head">
       <div>
@@ -83,7 +132,7 @@
     <section id="class-grid" class="grid grid-classes"></section>
   </main>
 
-  <!-- ======================== 3. 활동 목록 ======================== -->
+  <!-- ======================== 4. 활동 목록 ======================== -->
   <main id="screen-activities" class="screen container" hidden>
     <header class="page-head">
       <button class="btn-back" data-back="classes">← 반 목록</button>
@@ -98,7 +147,7 @@
     <section id="activity-list" class="stack"></section>
   </main>
 
-  <!-- ======================== 4. 보드 (자유게시 OR 8 컬럼) ======================== -->
+  <!-- ======================== 5. 보드 ======================== -->
   <main id="screen-board" class="screen board-screen" hidden>
     <header class="page-head container">
       <button class="btn-back" data-back="activities">← 활동 목록</button>
@@ -112,12 +161,30 @@
         <button id="btn-export" class="btn-ghost" hidden>⇩ CSV 내보내기</button>
       </div>
     </header>
-
-    <!-- 자유 게시 모드: 단일 영역 -->
     <section id="free-area" class="container free-area" hidden></section>
-
-    <!-- 컬럼 모드: 가로 스크롤 -->
     <section id="columns-area" class="columns-area" hidden></section>
+  </main>
+
+  <!-- ======================== 6. 회원 관리 ======================== -->
+  <main id="screen-members" class="screen container" hidden>
+    <header class="page-head">
+      <button class="btn-back" id="btn-back-from-members">← 반 목록</button>
+      <div>
+        <h2 class="h2">회원 관리</h2>
+        <p class="muted">가입 승인, 탈퇴, 비밀번호 초기화, 교사 코드를 관리합니다.</p>
+      </div>
+    </header>
+
+    <!-- 탭 -->
+    <div class="member-tabs">
+      <button class="member-tab active" data-tab="pending">승인 대기</button>
+      <button class="member-tab" data-tab="active">승인된 회원</button>
+      <button class="member-tab" data-tab="codes">교사 코드</button>
+    </div>
+
+    <div id="member-pending" class="member-panel"></div>
+    <div id="member-active"  class="member-panel" hidden></div>
+    <div id="member-codes"   class="member-panel" hidden></div>
   </main>
 
   <!-- ======================== 게시물 작성 모달 ======================== -->
@@ -127,25 +194,19 @@
         <h3>게시물 작성</h3>
         <button class="icon-btn" data-close="modal-post" aria-label="닫기">✕</button>
       </header>
-
       <div class="seg-tabs">
         <button class="seg active" data-type="basic">일반 게시물</button>
         <button class="seg" data-type="inquiry">탐구 질문 (5단계)</button>
       </div>
-
       <div class="modal-body">
         <div class="meta-line">
           <span class="pill pill-mint" id="post-author">작성자</span>
           <span class="pill pill-soft" id="post-target">조</span>
         </div>
-
-        <!-- 컬럼 선택 (컬럼 모드일 때만) -->
         <label class="field" id="post-group-select-wrap" hidden>
           <span>게시할 조</span>
           <select id="post-group-select"></select>
         </label>
-
-        <!-- 일반 게시물 영역 -->
         <div data-show="basic">
           <label class="field">
             <span>제목</span>
@@ -156,52 +217,18 @@
             <textarea id="post-content" rows="6" placeholder="게시물 내용을 입력하세요."></textarea>
           </label>
         </div>
-
-        <!-- 탐구 5단계 영역 (제목 필드 없음) -->
         <div data-show="inquiry" class="inquiry-stack" hidden>
-          <div class="step-card">
-            <span class="step-num">1</span>
-            <div>
-              <strong>관찰 중 궁금했던 점</strong>
-              <textarea id="step1" rows="2" placeholder="관찰 과정에서 어떤 점이 궁금했는지 자유롭게 적어보세요."></textarea>
-            </div>
-          </div>
-          <div class="step-card">
-            <span class="step-num">2</span>
-            <div>
-              <strong>탐구 질문</strong>
-              <textarea id="step2" rows="2" placeholder="궁금증을 구체적인 탐구 질문 문장으로 만들어보세요."></textarea>
-            </div>
-          </div>
-          <div class="step-card">
-            <span class="step-num">3</span>
-            <div>
-              <strong>예상 답변</strong>
-              <textarea id="step3" rows="2" placeholder="내가 생각하는 답을 이유와 함께 적어보세요."></textarea>
-            </div>
-          </div>
-          <div class="step-card">
-            <span class="step-num">4</span>
-            <div>
-              <strong>AI 답변</strong>
-              <textarea id="step4" rows="2" placeholder="AI에게 물어본 답을 내 언어로 정리해서 적어보세요."></textarea>
-            </div>
-          </div>
-          <div class="step-card">
-            <span class="step-num">5</span>
-            <div>
-              <strong>비판적 검토</strong>
-              <textarea id="step5" rows="2" placeholder="내 예상 답변과 AI 답변을 비교하여 부족한 점·다른 점을 검토해보세요."></textarea>
-            </div>
-          </div>
+          <div class="step-card"><span class="step-num">1</span><div><strong>관찰 중 궁금했던 점</strong><textarea id="step1" rows="2" placeholder="관찰 과정에서 어떤 점이 궁금했는지 자유롭게 적어보세요."></textarea></div></div>
+          <div class="step-card"><span class="step-num">2</span><div><strong>탐구 질문</strong><textarea id="step2" rows="2" placeholder="궁금증을 구체적인 탐구 질문 문장으로 만들어보세요."></textarea></div></div>
+          <div class="step-card"><span class="step-num">3</span><div><strong>예상 답변</strong><textarea id="step3" rows="2" placeholder="내가 생각하는 답을 이유와 함께 적어보세요."></textarea></div></div>
+          <div class="step-card"><span class="step-num">4</span><div><strong>AI 답변</strong><textarea id="step4" rows="2" placeholder="AI에게 물어본 답을 내 언어로 정리해서 적어보세요."></textarea></div></div>
+          <div class="step-card"><span class="step-num">5</span><div><strong>비판적 검토</strong><textarea id="step5" rows="2" placeholder="내 예상 답변과 AI 답변을 비교하여 부족한 점·다른 점을 검토해보세요."></textarea></div></div>
         </div>
-
         <label class="field">
           <span>파일 첨부 (선택, 10MB 제한 · 동영상 불가)</span>
           <input type="file" id="post-file" accept="image/*,.pdf,.docx,.pptx,.hwp,.hwpx" />
         </label>
       </div>
-
       <footer class="modal-foot">
         <button class="btn-ghost" data-close="modal-post">취소</button>
         <button id="btn-submit-post" class="btn-primary">게시하기</button>
