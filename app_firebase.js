@@ -14,7 +14,7 @@ const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebaseda
 const FB_STORAGE = 'yulha-2026-1.appspot.com';
 
 // 버전이 바뀌면 구버전 세션 자동 삭제
-const APP_VERSION = 'v4';
+const APP_VERSION = 'v5';
 if (sessionStorage.getItem('sb.version') !== APP_VERSION) {
   sessionStorage.clear();
   sessionStorage.setItem('sb.version', APP_VERSION);
@@ -600,6 +600,16 @@ async function adminLogin() {
 
 function logout() { clearSession(); show('screen-login'); }
 
+// 학생 로그인 시 관리자 전용 요소를 DOM에서 완전히 제거
+function stripAdminOnlyElements() {
+  if (isAdmin()) return;
+  ['#btn-members', '#btn-new-activity', '#btn-clear-posts',
+   '#btn-new-class', '#btn-new-note'].forEach(sel => {
+    const el = $(sel);
+    if (el) el.remove();
+  });
+}
+
 async function enterApp() {
   try {
     const m = await api('meta.activeSemester', {});
@@ -611,8 +621,7 @@ async function enterApp() {
   $('#user-chip').innerHTML = u.admin
     ? `<strong>관리자</strong>`
     : `<span>${escapeHtml(u.sid)}</span>&nbsp;${escapeHtml(u.name)}`;
-  $('#btn-members').hidden = !isAdmin();
-  if (!isAdmin() && $('#btn-members')) $('#btn-members').remove();
+  stripAdminOnlyElements();
   showHome();
 }
 
