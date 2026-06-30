@@ -13,6 +13,13 @@
 const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebasedatabase.app/';
 const FB_STORAGE = 'yulha-2026-1.appspot.com';
 
+// 버전이 바뀌면 구버전 세션 자동 삭제
+const APP_VERSION = 'v3';
+if (sessionStorage.getItem('sb.version') !== APP_VERSION) {
+  sessionStorage.clear();
+  sessionStorage.setItem('sb.version', APP_VERSION);
+}
+
 /*
   ── Firebase 데이터 구조 ─────────────────────────────────────
   /meta/activeSemester
