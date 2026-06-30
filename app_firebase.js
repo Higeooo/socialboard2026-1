@@ -14,7 +14,7 @@ const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebaseda
 const FB_STORAGE = 'yulha-2026-1.appspot.com';
 
 // 버전이 바뀌면 구버전 세션 자동 삭제
-const APP_VERSION = 'v5';
+const APP_VERSION = 'v6';
 if (sessionStorage.getItem('sb.version') !== APP_VERSION) {
   sessionStorage.clear();
   sessionStorage.setItem('sb.version', APP_VERSION);
@@ -898,6 +898,8 @@ async function openClass(classId, className) {
   state.cur.classId = classId; state.cur.className = className;
   $('#cur-class-title').textContent = className + ' / 활동 목록';
   $('#cur-class-sub').textContent = state.semester + '학기';
+  const backBtn = $('[data-back="classes"]');
+  if (backBtn) backBtn.textContent = isAdmin() ? '← 반 목록' : '← 홈';
   if (isAdmin()) {
     $('#btn-new-activity').hidden = false;
     $('#btn-clear-posts').hidden  = false;
@@ -1481,7 +1483,10 @@ function bindOnce() {
   $$('[data-back]').forEach(b => {
     b.addEventListener('click', () => {
       const t = b.dataset.back;
-      if (t === 'classes') { renderClasses(); show('screen-classes'); }
+      if (t === 'classes') {
+        if (isAdmin()) { renderClasses(); show('screen-classes'); }
+        else { showHome(); }
+      }
       if (t === 'activities') show('screen-activities');
     });
   });
