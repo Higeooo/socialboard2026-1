@@ -10,8 +10,8 @@
    - 모바일 대응
    ============================================================ */
 
-const FB_URL     = 'https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com';
-const FB_STORAGE = 'YOUR_PROJECT_ID.appspot.com';
+const FB_URL     = 'https://yulha-2026-1-default-rtdb.asia-southeast1.firebasedatabase.app/';
+const FB_STORAGE = 'yulha-2026-1.appspot.com';
 
 /*
   ── Firebase 데이터 구조 ─────────────────────────────────────
